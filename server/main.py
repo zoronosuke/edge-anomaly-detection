@@ -1,41 +1,36 @@
-"""
-エッジ異常検知システム - メインサーバー
-研究用システムでCSV/JSONファイルベースのデータ保存を使用
-"""
-
 import os
-import io
-import csv
 import json
-import time
+import csv
 import uuid
-from datetime import datetime
-from typing import Dict, Optional, List
+import asyncio
+from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Dict, Optional
+import logging
 
-import uvicorn
-from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Header, BackgroundTasks
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Depends, Security
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+import uvicorn
+from ultralytics import YOLO
 import cv2
 import numpy as np
 from PIL import Image
-from ultralytics import YOLO
-from dotenv import load_dotenv
-import pandas as pd
+import aiofiles
+# from line_notifier import line_notifier
 
-from models import EventRecord, SystemLog
-from line_notifier import LineNotifier
-from data_manager import DataManager
-
-# 環境変数の読み込み
-load_dotenv()
-
-app = FastAPI(
-    title="Edge Anomaly Detection System",
-    description="エッジデバイス用異常検知システム（研究用）",
-    version="1.0.0"
+# ログ設定
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('logs/server.log', encoding='utf-8'),
+        logging.StreamHandler()
+    ]
 )
+logger = logging.getLogger(__name__)
+
+app = FastAPI(title="Edge Anomaly Detection Server", version="1.0.0")
 
 # CORS設定
 app.add_middleware(
@@ -46,315 +41,275 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# グローバル変数
-yolo_model: Optional[YOLO] = None
-line_notifier: Optional[LineNotifier] = None
-data_manager: DataManager = None
+# セキュリティ
+security = HTTPBearer()
 
-# デバイスごとの状態管理
-device_states: Dict[str, Dict] = {}
+class DetectionSystem:
+    def __init__(self):
+        self.model = None
+        self.last_alert_at: Dict[str, datetime] = {}
+        self.last_event_sig: Dict[str, str] = {}
+        self.cooldown_seconds = int(os.getenv('COOLDOWN_SECONDS', 30))
+        self.threshold = float(os.getenv('PERSON_DETECTION_THRESHOLD', 0.5))
+        self.data_dir = Path(os.getenv('DATA_DIR', './data'))
+        self.data_dir.mkdir(exist_ok=True)
+        
+        # CSVファイルの初期化
+        self.events_csv = self.data_dir / 'events.csv'
+        self.performance_csv = self.data_dir / 'performance_metrics.csv'
+        self._init_csv_files()
+        
+        logger.info("DetectionSystem initialized")
+    
+    def _init_csv_files(self):
+        """CSVファイルのヘッダーを初期化"""
+        if not self.events_csv.exists():
+            with open(self.events_csv, 'w', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                writer.writerow([
+                    'event_id', 'device_id', 'timestamp', 'person_count', 
+                    'anomaly_flag', 'confidence_scores', 'processing_time_ms',
+                    'image_filename'
+                ])
+        
+        if not self.performance_csv.exists():
+            with open(self.performance_csv, 'w', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                writer.writerow([
+                    'timestamp', 'device_id', 'request_size_bytes', 
+                    'processing_time_ms', 'inference_time_ms', 'total_response_time_ms'
+                ])
+    
+    async def load_model(self):
+        """YOLOモデルを読み込み"""
+        if self.model is None:
+            logger.info("Loading YOLOv8n model...")
+            self.model = YOLO('yolov8n.pt')
+            logger.info("Model loaded successfully")
+    
+    def detect_persons(self, image: np.ndarray) -> tuple:
+        """人物検出を実行"""
+        start_time = datetime.now()
+        
+        results = self.model(image, conf=self.threshold)
+        
+        # 人物クラス（class_id=0）のみを抽出
+        person_detections = []
+        for result in results:
+            boxes = result.boxes
+            if boxes is not None:
+                for box in boxes:
+                    class_id = int(box.cls[0])
+                    if class_id == 0:  # person class
+                        confidence = float(box.conf[0])
+                        person_detections.append(confidence)
+        
+        inference_time = (datetime.now() - start_time).total_seconds() * 1000
+        return person_detections, inference_time
+    
+    def should_send_alert(self, device_id: str, person_count: int) -> bool:
+        """アラートを送信すべきかチェック"""
+        now = datetime.now()
+        
+        # クールダウンチェック
+        if device_id in self.last_alert_at:
+            time_diff = now - self.last_alert_at[device_id]
+            if time_diff.total_seconds() < self.cooldown_seconds:
+                return False
+        
+        # イベント重複チェック（同じ人数の検出は重複とみなす）
+        event_sig = f"{person_count}"
+        if device_id in self.last_event_sig:
+            if self.last_event_sig[device_id] == event_sig:
+                return False
+        
+        return person_count > 0
+    
+    async def save_event(self, event_data: dict):
+        """イベントをCSVに保存"""
+        async with aiofiles.open(self.events_csv, 'a', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            await f.write(','.join([
+                str(event_data['event_id']),
+                str(event_data['device_id']),
+                str(event_data['timestamp']),
+                str(event_data['person_count']),
+                str(event_data['anomaly_flag']),
+                str(event_data['confidence_scores']),
+                str(event_data['processing_time_ms']),
+                str(event_data['image_filename'])
+            ]) + '\n')
+    
+    async def save_performance_metrics(self, metrics: dict):
+        """パフォーマンスメトリクスをCSVに保存"""
+        async with aiofiles.open(self.performance_csv, 'a', newline='', encoding='utf-8') as f:
+            await f.write(','.join([
+                str(metrics['timestamp']),
+                str(metrics['device_id']),
+                str(metrics['request_size_bytes']),
+                str(metrics['processing_time_ms']),
+                str(metrics['inference_time_ms']),
+                str(metrics['total_response_time_ms'])
+            ]) + '\n')
 
-def get_device_state(device_id: str) -> Dict:
-    """デバイス状態を取得（存在しない場合は初期化）"""
-    if device_id not in device_states:
-        device_states[device_id] = {
-            "last_alert_at": 0,
-            "last_event_signature": "",
-            "last_event_time": 0,
-            "total_detections": 0
-        }
-    return device_states[device_id]
+# グローバルインスタンス
+detection_system = DetectionSystem()
+
+async def verify_api_key(credentials: HTTPAuthorizationCredentials = Security(security)):
+    """API キーの検証"""
+    expected_key = os.getenv('API_KEY', 'your_api_key_here')
+    if credentials.credentials != expected_key:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+    return credentials.credentials
 
 @app.on_event("startup")
 async def startup_event():
-    """アプリケーション起動時の初期化"""
-    global yolo_model, line_notifier, data_manager
-    
-    print("🚀 Edge Anomaly Detection System を起動中...")
-    
-    # データディレクトリの作成
-    data_dir = Path(os.getenv("DATA_DIR", "./data"))
-    images_dir = Path(os.getenv("IMAGES_DIR", "./data/images"))
-    data_dir.mkdir(exist_ok=True)
-    images_dir.mkdir(exist_ok=True)
-    
-    # データマネージャーの初期化
-    try:
-        data_manager = DataManager()
-        print("✅ データマネージャー初期化完了")
-    except Exception as e:
-        print(f"❌ データマネージャー初期化失敗: {e}")
-    
-    # YOLOモデルの読み込み
-    try:
-        model_path = os.getenv("YOLO_MODEL", "yolov8n.pt")
-        print(f"📋 YOLOモデルを読み込み中: {model_path}")
-        yolo_model = YOLO(model_path)
-        print("✅ YOLOモデルの読み込み完了")
-    except Exception as e:
-        print(f"❌ YOLOモデルの読み込み失敗: {e}")
-        yolo_model = None
-    
-    # LINE通知の初期化
-    try:
-        line_notifier = LineNotifier()
-        print("✅ LINE通知システム初期化完了")
-    except Exception as e:
-        print(f"⚠️ LINE通知システム初期化失敗: {e}")
-        line_notifier = None
-    
-    print("🎯 システム起動完了!")
+    """アプリケーション起動時の処理"""
+    await detection_system.load_model()
+    logger.info("Server startup completed")
 
 @app.get("/")
 async def root():
-    """ヘルスチェック用エンドポイント"""
-    return {
-        "status": "running",
-        "system": "Edge Anomaly Detection System",
-        "version": "1.0.0",
-        "timestamp": datetime.now().isoformat(),
-        "yolo_loaded": yolo_model is not None,
-        "line_enabled": line_notifier is not None and line_notifier.is_enabled()
-    }
+    """ヘルスチェック"""
+    return {"status": "ok", "message": "Edge Anomaly Detection Server"}
 
 @app.post("/ingest")
 async def ingest_image(
-    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     device_id: str = Form(...),
     ts: Optional[str] = Form(None),
-    x_api_key: Optional[str] = Header(None)
+    api_key: str = Depends(verify_api_key)
 ):
-    """
-    エッジデバイスからの画像データ受信・処理エンドポイント
-    """
-    # API KEY検証
-    expected_api_key = os.getenv("API_KEY")
-    if expected_api_key and x_api_key != expected_api_key:
-        raise HTTPException(status_code=401, detail="Invalid API key")
-    
-    # タイムスタンプの処理
-    if ts is None:
-        timestamp = datetime.now()
-    else:
-        try:
-            timestamp = datetime.fromisoformat(ts)
-        except ValueError:
-            timestamp = datetime.now()
-    
-    # ファイル形式チェック
-    if not file.content_type.startswith("image/"):
-        raise HTTPException(status_code=400, detail="Invalid file type. Image required.")
+    """画像を受信して人物検出を実行"""
+    start_time = datetime.now()
     
     try:
+        # タイムスタンプの処理
+        if ts:
+            timestamp = datetime.fromisoformat(ts.replace('Z', '+00:00'))
+        else:
+            timestamp = start_time
+        
         # 画像の読み込み
-        image_bytes = await file.read()
-        image = Image.open(io.BytesIO(image_bytes))
-        image_array = np.array(image)
+        contents = await file.read()
+        nparr = np.frombuffer(contents, np.uint8)
+        image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
         
-        # 推論処理
-        person_count = 0
-        anomaly_detected = False
+        if image is None:
+            raise HTTPException(status_code=400, detail="Invalid image format")
         
-        if yolo_model is not None:
-            try:
-                results = yolo_model(image_array)
-                
-                # person クラス（クラスID=0）の検出
-                for result in results:
-                    boxes = result.boxes
-                    if boxes is not None:
-                        # confidence >= threshold の person を数える
-                        conf_threshold = float(os.getenv("CONFIDENCE_THRESHOLD", "0.5"))
-                        person_detections = boxes[
-                            (boxes.cls == 0) & (boxes.conf >= conf_threshold)
-                        ]
-                        person_count = len(person_detections)
-                        break
-                
-                # 異常判定（人が検出された場合）
-                anomaly_detected = person_count > 0
-                
-            except Exception as e:
-                print(f"⚠️ 推論エラー: {e}")
+        # 人物検出
+        person_detections, inference_time = detection_system.detect_persons(image)
+        person_count = len(person_detections)
         
-        # イベント記録
+        # アラート判定
+        should_alert = detection_system.should_send_alert(device_id, person_count)
+        
+        if should_alert:
+            detection_system.last_alert_at[device_id] = start_time
+            detection_system.last_event_sig[device_id] = str(person_count)
+        
+        # 画像保存（人が検出された場合のみ）
+        image_filename = None
+        if person_count > 0:
+            image_filename = f"{device_id}_{timestamp.strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}.jpg"
+            image_path = detection_system.data_dir / image_filename
+            cv2.imwrite(str(image_path), image)
+        
+        # イベント保存
         event_id = str(uuid.uuid4())
-        event_record = EventRecord(
-            event_id=event_id,
-            device_id=device_id,
-            timestamp=timestamp,
-            person_count=person_count,
-            anomaly_flag=anomaly_detected,
-            image_filename=f"{event_id}.jpg" if anomaly_detected else None,
-            confidence_threshold=float(os.getenv("CONFIDENCE_THRESHOLD", "0.5"))
-        )
+        event_data = {
+            'event_id': event_id,
+            'device_id': device_id,
+            'timestamp': timestamp.isoformat(),
+            'person_count': person_count,
+            'anomaly_flag': should_alert,
+            'confidence_scores': json.dumps(person_detections),
+            'processing_time_ms': inference_time,
+            'image_filename': image_filename or ''
+        }
         
-        # バックグラウンドタスクで処理
-        background_tasks.add_task(
-            process_detection_result,
-            event_record,
-            image_bytes if anomaly_detected else None,
-            device_id
-        )
+        await detection_system.save_event(event_data)
+        
+        # パフォーマンスメトリクス保存
+        total_time = (datetime.now() - start_time).total_seconds() * 1000
+        metrics = {
+            'timestamp': start_time.isoformat(),
+            'device_id': device_id,
+            'request_size_bytes': len(contents),
+            'processing_time_ms': total_time,
+            'inference_time_ms': inference_time,
+            'total_response_time_ms': total_time
+        }
+        
+        await detection_system.save_performance_metrics(metrics)
+        
+        # 通知処理
+        if should_alert:
+            logger.info(f"[ALERT] Device: {device_id}, Person count: {person_count}")
+            # LINE通知を送信（テスト用に一時無効化）
+            # try:
+            #     line_notifier.send_detection_alert(
+            #         device_id=device_id,
+            #         person_count=person_count,
+            #         timestamp=timestamp,
+            #         confidence_scores=person_detections
+            #     )
+            # except Exception as e:
+            #     logger.error(f"Failed to send LINE notification: {e}")
+        
+        logger.info(f"Processed image from {device_id}: {person_count} persons detected")
         
         return {
-            "status": "success",
             "event_id": event_id,
             "device_id": device_id,
             "timestamp": timestamp.isoformat(),
             "person_count": person_count,
-            "anomaly_detected": anomaly_detected,
-            "processing_time_ms": int((datetime.now() - timestamp).total_seconds() * 1000)
+            "anomaly_detected": should_alert,
+            "confidence_scores": person_detections,
+            "processing_time_ms": total_time
         }
-        
-    except Exception as e:
-        # エラーログ
-        error_log = SystemLog(
-            log_id=str(uuid.uuid4()),
-            timestamp=datetime.now(),
-            level="ERROR",
-            device_id=device_id,
-            message=f"画像処理エラー: {str(e)}",
-            details={"error_type": type(e).__name__}
-        )
-        data_manager.save_system_log(error_log)
-        
-        raise HTTPException(status_code=500, detail=f"処理エラー: {str(e)}")
-
-async def process_detection_result(
-    event_record: EventRecord,
-    image_bytes: Optional[bytes],
-    device_id: str
-):
-    """検出結果の後処理（通知・保存）"""
-    try:
-        # イベントをCSVに保存
-        data_manager.save_event(event_record)
-        
-        # 画像保存（異常検出時のみ）
-        if image_bytes and event_record.image_filename:
-            image_path = Path(os.getenv("IMAGES_DIR", "./data/images")) / event_record.image_filename
-            with open(image_path, "wb") as f:
-                f.write(image_bytes)
-        
-        # デバイス状態の更新
-        device_state = get_device_state(device_id)
-        device_state["total_detections"] += 1
-        
-        # 通知処理（異常検出 + クールダウン条件）
-        if event_record.anomaly_flag and line_notifier and line_notifier.is_enabled():
-            current_time = time.time()
-            cooldown_seconds = int(os.getenv("ALERT_COOLDOWN_SECONDS", "300"))
-            
-            # クールダウンチェック
-            if current_time - device_state["last_alert_at"] >= cooldown_seconds:
-                # 重複抑制チェック
-                event_signature = f"{device_id}_{event_record.person_count}_{int(current_time/10)*10}"
-                
-                if event_signature != device_state["last_event_signature"]:
-                    # LINE通知送信
-                    message = f"""🚨 [人検出アラート]
-デバイス: {device_id}
-検出数: {event_record.person_count}人
-時刻: {event_record.timestamp.strftime('%Y-%m-%d %H:%M:%S')}
-イベントID: {event_record.event_id}"""
-                    
-                    success = await line_notifier.send_message(message)
-                    
-                    if success:
-                        device_state["last_alert_at"] = current_time
-                        device_state["last_event_signature"] = event_signature
-                        
-                        # 通知ログ
-                        notification_log = SystemLog(
-                            log_id=str(uuid.uuid4()),
-                            timestamp=datetime.now(),
-                            level="INFO",
-                            device_id=device_id,
-                            message="LINE通知送信成功",
-                            details={
-                                "event_id": event_record.event_id,
-                                "person_count": event_record.person_count
-                            }
-                        )
-                        data_manager.save_system_log(notification_log)
-        
-        # 処理完了ログ
-        process_log = SystemLog(
-            log_id=str(uuid.uuid4()),
-            timestamp=datetime.now(),
-            level="INFO",
-            device_id=device_id,
-            message="検出処理完了",
-            details={
-                "event_id": event_record.event_id,
-                "person_count": event_record.person_count,
-                "anomaly_detected": event_record.anomaly_flag
-            }
-        )
-        data_manager.save_system_log(process_log)
-        
-    except Exception as e:
-        error_log = SystemLog(
-            log_id=str(uuid.uuid4()),
-            timestamp=datetime.now(),
-            level="ERROR",
-            device_id=device_id,
-            message=f"後処理エラー: {str(e)}",
-            details={"error_type": type(e).__name__}
-        )
-        data_manager.save_system_log(error_log)
-        print(f"❌ 後処理エラー: {e}")
-
-@app.get("/status/{device_id}")
-async def get_device_status(device_id: str):
-    """デバイス状態の取得"""
-    device_state = get_device_state(device_id)
-    recent_events = data_manager.get_recent_events(device_id, limit=10)
     
-    return {
-        "device_id": device_id,
-        "state": device_state,
-        "recent_events": recent_events,
-        "system_status": {
-            "yolo_loaded": yolo_model is not None,
-            "line_enabled": line_notifier is not None and line_notifier.is_enabled()
-        }
-    }
+    except Exception as e:
+        logger.error(f"Error processing image from {device_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Processing error: {str(e)}")
 
 @app.get("/events")
-async def get_events(
-    device_id: Optional[str] = None,
-    limit: int = 50,
-    anomaly_only: bool = False
-):
-    """イベント一覧の取得"""
-    events = data_manager.get_events(
-        device_id=device_id,
-        limit=limit,
-        anomaly_only=anomaly_only
-    )
-    return {"events": events, "count": len(events)}
+async def get_events(device_id: Optional[str] = None, limit: int = 100):
+    """イベント履歴を取得"""
+    events = []
+    
+    if detection_system.events_csv.exists():
+        with open(detection_system.events_csv, 'r', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                if device_id is None or row['device_id'] == device_id:
+                    events.append(row)
+                if len(events) >= limit:
+                    break
+    
+    return {"events": events[::-1]}  # 最新順
 
-@app.get("/logs")
-async def get_system_logs(
-    device_id: Optional[str] = None,
-    level: Optional[str] = None,
-    limit: int = 100
-):
-    """システムログの取得"""
-    logs = data_manager.get_system_logs(
-        device_id=device_id,
-        level=level,
-        limit=limit
-    )
-    return {"logs": logs, "count": len(logs)}
+@app.get("/metrics")
+async def get_metrics(device_id: Optional[str] = None, limit: int = 100):
+    """パフォーマンスメトリクスを取得"""
+    metrics = []
+    
+    if detection_system.performance_csv.exists():
+        with open(detection_system.performance_csv, 'r', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                if device_id is None or row['device_id'] == device_id:
+                    metrics.append(row)
+                if len(metrics) >= limit:
+                    break
+    
+    return {"metrics": metrics[::-1]}  # 最新順
 
 if __name__ == "__main__":
     uvicorn.run(
         "main:app",
-        host=os.getenv("SERVER_HOST", "0.0.0.0"),
-        port=int(os.getenv("SERVER_PORT", "8000")),
+        host=os.getenv('SERVER_HOST', '0.0.0.0'),
+        port=int(os.getenv('SERVER_PORT', 8000)),
         reload=True
     )

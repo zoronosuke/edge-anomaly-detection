@@ -1,0 +1,78 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environment
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# PyCharm
+.idea/
+
+# VSCode
+.vscode/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Environment variables
+.env
+.env.local
+
+# Data files
+data/
+logs/
+*.log
+
+# Model files
+models/
+weights/
+*.pt
+*.pth
+
+# Temporary files
+temp/
+tmp/
+*.tmp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Images and videos
+*.jpg
+*.jpeg
+*.png
+*.mp4
+*.avi
+*.mov
+uploads/
+images/
+
+# CSV and JSON data files (except config files)
+events.csv
+detection_results.json
+performance_metrics.json

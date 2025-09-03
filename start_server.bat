@@ -1,30 +1,33 @@
 @echo off
-echo 🚀 Edge Anomaly Detection System - Server起動
+echo Starting Edge Anomaly Detection Server...
 
-cd /d "%~dp0"
-
-REM Python仮想環境のアクティベート（存在する場合）
-if exist "venv\Scripts\activate.bat" (
-    echo 📦 仮想環境をアクティベート
-    call venv\Scripts\activate.bat
+:: Check if virtual environment exists
+if not exist "venv\" (
+    echo Creating virtual environment...
+    python -m venv venv
 )
 
-REM 環境変数ファイルのコピー（初回のみ）
+:: Activate virtual environment
+call venv\Scripts\activate.bat
+
+:: Install dependencies
+echo Installing dependencies...
+pip install -r requirements.txt
+
+:: Create .env file if it doesn't exist
 if not exist ".env" (
-    if exist ".env.example" (
-        echo ⚙️ 環境変数ファイルをコピー
-        copy ".env.example" ".env"
-        echo ⚠️ .envファイルを編集してLINE設定などを行ってください
-        pause
-    )
+    echo Creating .env file from template...
+    copy .env.example .env
+    echo Please edit .env file with your configuration before running the server
+    pause
 )
 
-REM 必要なディレクトリの作成
-if not exist "data" mkdir data
-if not exist "data\images" mkdir "data\images"
+:: Create data directories
+if not exist "data\" mkdir data
+if not exist "logs\" mkdir logs
 
-REM サーバー起動
-echo 🌐 FastAPIサーバーを起動中...
+:: Start server
+echo Starting FastAPI server...
 cd server
 python main.py
 

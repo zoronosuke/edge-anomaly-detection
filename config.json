@@ -1,0 +1,33 @@
+{
+  "server": {
+    "host": "0.0.0.0",
+    "port": 8000,
+    "api_key": "your_api_key_here",
+    "log_level": "INFO"
+  },
+  "detection": {
+    "model": "yolov8n.pt",
+    "confidence_threshold": 0.5,
+    "cooldown_seconds": 30,
+    "max_detection_history": 1000
+  },
+  "data_storage": {
+    "data_directory": "./data",
+    "log_directory": "./logs",
+    "save_images": true,
+    "image_format": "jpg",
+    "image_quality": 85
+  },
+  "line_notification": {
+    "enabled": false,
+    "channel_access_token": "",
+    "channel_secret": "",
+    "target_user_id": "",
+    "target_group_id": ""
+  },
+  "performance": {
+    "enable_metrics": true,
+    "metrics_interval_seconds": 60,
+    "cleanup_old_data_days": 30
+  }
+}

@@ -1,112 +1,231 @@
-"""
-LINE通知システム
-"""
-
 import os
-import asyncio
+import requests
+import json
+import logging
+from datetime import datetime
 from typing import Optional
-from linebot.v3 import WebhookHandler
-from linebot.v3.messaging import Configuration, ApiClient, MessagingApi, PushMessageRequest, TextMessage
-from linebot.v3.exceptions import InvalidSignatureError
 
+logger = logging.getLogger(__name__)
 
 class LineNotifier:
-    """LINE Bot APIを使用した通知システム"""
-    
     def __init__(self):
-        self.channel_access_token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
-        self.channel_secret = os.getenv("LINE_CHANNEL_SECRET")
-        self.user_id = os.getenv("LINE_USER_ID")  # 通知先のユーザーID
+        self.channel_access_token = os.getenv('LINE_CHANNEL_ACCESS_TOKEN')
+        self.channel_secret = os.getenv('LINE_CHANNEL_SECRET')
+        self.enabled = bool(self.channel_access_token)
         
-        self.api_client = None
-        self.messaging_api = None
-        
-        if self.channel_access_token and self.channel_secret:
-            try:
-                configuration = Configuration(access_token=self.channel_access_token)
-                self.api_client = ApiClient(configuration)
-                self.messaging_api = MessagingApi(self.api_client)
-                print("✅ LINE Bot API 初期化成功")
-            except Exception as e:
-                print(f"⚠️ LINE Bot API 初期化失敗: {e}")
+        if not self.enabled:
+            logger.warning("LINE Messaging API not configured. Notifications will be disabled.")
         else:
-            print("⚠️ LINE Bot の認証情報が設定されていません")
+            logger.info("LINE Messaging API configured successfully")
     
-    def is_enabled(self) -> bool:
-        """LINE通知が有効かどうか"""
-        return (
-            self.messaging_api is not None and 
-            self.channel_access_token is not None and
-            self.user_id is not None
-        )
-    
-    async def send_message(self, message: str, user_id: Optional[str] = None) -> bool:
-        """
-        LINEメッセージを送信
+    def send_detection_alert(self, device_id: str, person_count: int, timestamp: datetime, confidence_scores: list):
+        """人検出アラートを送信"""
+        if not self.enabled:
+            logger.info(f"[MOCK LINE] Alert: Device={device_id}, Count={person_count}")
+            return
         
-        Args:
-            message: 送信するメッセージ
-            user_id: 送信先ユーザーID（省略時は環境変数から取得）
-            
-        Returns:
-            送信成功かどうか
-        """
-        if not self.is_enabled():
-            print("⚠️ LINE通知が無効です")
-            return False
+        # メッセージ作成
+        message_text = self._create_alert_message(device_id, person_count, timestamp, confidence_scores)
         
-        target_user_id = user_id or self.user_id
-        if not target_user_id:
-            print("⚠️ 送信先ユーザーIDが設定されていません")
-            return False
+        # Flex Message作成（より見栄えの良い通知）
+        flex_message = self._create_flex_message(device_id, person_count, timestamp, confidence_scores)
         
         try:
-            # メッセージオブジェクトの作成
-            text_message = TextMessage(text=message)
-            request = PushMessageRequest(
-                to=target_user_id,
-                messages=[text_message]
-            )
-            
-            # メッセージ送信（非同期）
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(
-                None,
-                lambda: self.messaging_api.push_message(request)
-            )
-            
-            print(f"📱 LINE通知送信成功: {target_user_id}")
-            return True
+            # Push APIを使用（実際の運用では適切なuser_idまたはgroup_idが必要）
+            # この例では管理者向けのテスト用ID使用
+            self._send_push_message("USER_ID_HERE", flex_message)
+            logger.info(f"LINE alert sent for device {device_id}")
             
         except Exception as e:
-            print(f"❌ LINE通知送信失敗: {e}")
-            return False
+            logger.error(f"Failed to send LINE notification: {e}")
+            # フォールバック：シンプルテキストメッセージ
+            try:
+                self._send_simple_message("USER_ID_HERE", message_text)
+            except Exception as e2:
+                logger.error(f"Failed to send fallback LINE message: {e2}")
     
-    async def send_rich_message(
-        self, 
-        title: str,
-        content: str,
-        details: Optional[dict] = None,
-        user_id: Optional[str] = None
-    ) -> bool:
-        """
-        リッチメッセージ（Flex Message）を送信
+    def _create_alert_message(self, device_id: str, person_count: int, timestamp: datetime, confidence_scores: list) -> str:
+        """シンプルなテキストメッセージを作成"""
+        avg_confidence = sum(confidence_scores) / len(confidence_scores) if confidence_scores else 0
         
-        Args:
-            title: メッセージタイトル
-            content: メッセージ内容
-            details: 詳細情報
-            user_id: 送信先ユーザーID
-            
-        Returns:
-            送信成功かどうか
-        """
-        # シンプルなテキストメッセージとして送信
-        message_parts = [f"🚨 {title}", f"📍 {content}"]
+        message = f"""🚨 人検出アラート
+デバイス: {device_id}
+検出人数: {person_count}人
+平均信頼度: {avg_confidence:.2f}
+時刻: {timestamp.strftime('%Y-%m-%d %H:%M:%S')}"""
         
-        if details:
-            for key, value in details.items():
-                message_parts.append(f"• {key}: {value}")
+        return message
+    
+    def _create_flex_message(self, device_id: str, person_count: int, timestamp: datetime, confidence_scores: list) -> dict:
+        """Flex Messageを作成"""
+        avg_confidence = sum(confidence_scores) / len(confidence_scores) if confidence_scores else 0
         
-        message = "\n".join(message_parts)
-        return await self.send_message(message, user_id)
+        flex_message = {
+            "type": "flex",
+            "altText": f"人検出アラート - {device_id}",
+            "contents": {
+                "type": "bubble",
+                "header": {
+                    "type": "box",
+                    "layout": "vertical",
+                    "contents": [
+                        {
+                            "type": "text",
+                            "text": "🚨 人検出アラート",
+                            "weight": "bold",
+                            "color": "#FF4444",
+                            "size": "lg"
+                        }
+                    ],
+                    "backgroundColor": "#FFE6E6"
+                },
+                "body": {
+                    "type": "box",
+                    "layout": "vertical",
+                    "contents": [
+                        {
+                            "type": "box",
+                            "layout": "baseline",
+                            "contents": [
+                                {
+                                    "type": "text",
+                                    "text": "デバイス:",
+                                    "color": "#666666",
+                                    "size": "sm",
+                                    "flex": 2
+                                },
+                                {
+                                    "type": "text",
+                                    "text": device_id,
+                                    "weight": "bold",
+                                    "size": "sm",
+                                    "flex": 3,
+                                    "wrap": True
+                                }
+                            ],
+                            "margin": "md"
+                        },
+                        {
+                            "type": "box",
+                            "layout": "baseline",
+                            "contents": [
+                                {
+                                    "type": "text",
+                                    "text": "検出人数:",
+                                    "color": "#666666",
+                                    "size": "sm",
+                                    "flex": 2
+                                },
+                                {
+                                    "type": "text",
+                                    "text": f"{person_count}人",
+                                    "weight": "bold",
+                                    "size": "sm",
+                                    "flex": 3,
+                                    "color": "#FF4444"
+                                }
+                            ],
+                            "margin": "md"
+                        },
+                        {
+                            "type": "box",
+                            "layout": "baseline",
+                            "contents": [
+                                {
+                                    "type": "text",
+                                    "text": "信頼度:",
+                                    "color": "#666666",
+                                    "size": "sm",
+                                    "flex": 2
+                                },
+                                {
+                                    "type": "text",
+                                    "text": f"{avg_confidence:.1%}",
+                                    "weight": "bold",
+                                    "size": "sm",
+                                    "flex": 3
+                                }
+                            ],
+                            "margin": "md"
+                        },
+                        {
+                            "type": "box",
+                            "layout": "baseline",
+                            "contents": [
+                                {
+                                    "type": "text",
+                                    "text": "時刻:",
+                                    "color": "#666666",
+                                    "size": "sm",
+                                    "flex": 2
+                                },
+                                {
+                                    "type": "text",
+                                    "text": timestamp.strftime('%Y-%m-%d %H:%M:%S'),
+                                    "size": "sm",
+                                    "flex": 3,
+                                    "wrap": True
+                                }
+                            ],
+                            "margin": "md"
+                        }
+                    ]
+                }
+            }
+        }
+        
+        return flex_message
+    
+    def _send_push_message(self, to: str, message: dict):
+        """Push APIでメッセージ送信"""
+        url = "https://api.line.me/v2/bot/message/push"
+        
+        headers = {
+            "Authorization": f"Bearer {self.channel_access_token}",
+            "Content-Type": "application/json"
+        }
+        
+        data = {
+            "to": to,
+            "messages": [message]
+        }
+        
+        response = requests.post(url, headers=headers, data=json.dumps(data))
+        response.raise_for_status()
+    
+    def _send_simple_message(self, to: str, text: str):
+        """シンプルテキストメッセージ送信"""
+        url = "https://api.line.me/v2/bot/message/push"
+        
+        headers = {
+            "Authorization": f"Bearer {self.channel_access_token}",
+            "Content-Type": "application/json"
+        }
+        
+        data = {
+            "to": to,
+            "messages": [
+                {
+                    "type": "text",
+                    "text": text
+                }
+            ]
+        }
+        
+        response = requests.post(url, headers=headers, data=json.dumps(data))
+        response.raise_for_status()
+    
+    def send_system_status(self, message: str):
+        """システム状態通知"""
+        if not self.enabled:
+            logger.info(f"[MOCK LINE] System: {message}")
+            return
+        
+        try:
+            self._send_simple_message("USER_ID_HERE", f"🔧 システム通知: {message}")
+            logger.info("System status notification sent")
+        except Exception as e:
+            logger.error(f"Failed to send system notification: {e}")
+
+# グローバルインスタンス
+line_notifier = LineNotifier()
