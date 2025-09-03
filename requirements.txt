@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+python-multipart
+opencv-python
+ultralytics
+Pillow
+requests
+line-bot-sdk
+python-dotenv
+pandas
+numpy
