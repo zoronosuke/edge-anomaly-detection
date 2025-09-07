@@ -1,8 +1,6 @@
 #!/bin/bash
-"""
-Jetson Nano環境セットアップスクリプト
-JetPack 4.6.6 + Python 3.8環境の構築
-"""
+# Jetson Nano環境セットアップスクリプト
+# JetPack 4.6.6 + Python 3.8環境の構築
 
 set -e
 
@@ -78,35 +76,73 @@ case $choice in
         echo "Python 3.8仮想環境のセットアップ"
         echo "=========================================="
         
-        # Python 3.8のインストール
-        echo "Python 3.8をインストールします..."
-        sudo apt update
-        sudo apt install -y python3.8 python3.8-venv python3.8-dev python3.8-distutils
+        # Python 3.8のインストール確認
+        if ! command -v python3.8 &> /dev/null; then
+            echo "Python 3.8をインストールします..."
+            sudo apt update
+            sudo apt install -y python3.8 python3.8-venv python3.8-dev python3.8-distutils
+            
+            # インストール確認
+            if ! command -v python3.8 &> /dev/null; then
+                echo "エラー: Python 3.8のインストールに失敗しました"
+                exit 1
+            fi
+        fi
         
         # 仮想環境の作成
         VENV_PATH="$HOME/venv-jetson-py38"
         echo "仮想環境を作成します: $VENV_PATH"
-        python3.8 -m venv $VENV_PATH
+        
+        # 既存の仮想環境がある場合は削除
+        if [ -d "$VENV_PATH" ]; then
+            echo "既存の仮想環境を削除します..."
+            rm -rf "$VENV_PATH"
+        fi
+        
+        # 仮想環境の作成
+        python3.8 -m venv "$VENV_PATH"
+        
+        # 仮想環境のアクティベート確認
+        if [ ! -f "$VENV_PATH/bin/activate" ]; then
+            echo "エラー: 仮想環境の作成に失敗しました"
+            exit 1
+        fi
         
         # 仮想環境のアクティベート
-        source $VENV_PATH/bin/activate
+        echo "仮想環境をアクティベートします..."
+        source "$VENV_PATH/bin/activate"
+        
+        # Python確認
+        echo "仮想環境のPython: $(python --version)"
         
         # pipのアップグレード
-        pip install --upgrade pip
+        echo "pipをアップグレードします..."
+        python -m pip install --upgrade pip
         
         # システムパッケージのインストール（OpenCV等）
         echo "システムパッケージをインストールします..."
-        sudo apt install -y python3-opencv python3-numpy
+        sudo apt install -y python3-opencv python3-numpy libopencv-dev
         
         # PyTorch（Jetson用）のインストール
         echo "Jetson用PyTorchをインストールします..."
         # JetPack 4.6.6用PyTorch wheel
-        wget https://nvidia.box.com/shared/static/fjtbno0vpo676a25cgvuqc1wty0fkkg6.whl -O torch-1.10.0-cp38-cp38-linux_aarch64.whl
-        pip install torch-1.10.0-cp38-cp38-linux_aarch64.whl
+        TORCH_WHL="torch-1.10.0-cp38-cp38-linux_aarch64.whl"
+        
+        if [ ! -f "$TORCH_WHL" ]; then
+            echo "PyTorch wheelをダウンロードします..."
+            wget https://nvidia.box.com/shared/static/fjtbno0vpo676a25cgvuqc1wty0fkkg6.whl -O "$TORCH_WHL"
+        fi
+        
+        python -m pip install "$TORCH_WHL"
         
         # torchvision
-        sudo apt install -y libjpeg-dev zlib1g-dev
-        git clone --branch v0.11.1 https://github.com/pytorch/vision torchvision
+        echo "torchvisionをインストールします..."
+        sudo apt install -y libjpeg-dev zlib1g-dev libopenblas-dev
+        
+        if [ ! -d "torchvision" ]; then
+            git clone --branch v0.11.1 https://github.com/pytorch/vision torchvision
+        fi
+        
         cd torchvision
         python setup.py install
         cd ..
@@ -114,23 +150,66 @@ case $choice in
         
         # その他の依存関係
         echo "プロジェクトの依存関係をインストールします..."
-        pip install -r requirements-jetson.txt
+        
+        # requirements-jetson.txtが存在するかチェック
+        if [ -f "requirements-jetson.txt" ]; then
+            python -m pip install -r requirements-jetson.txt
+        elif [ -f "requirements.txt" ]; then
+            echo "requirements-jetson.txtが見つからないため、requirements.txtを使用します"
+            python -m pip install -r requirements.txt
+        else
+            echo "警告: requirements ファイルが見つかりません"
+        fi
         
         # 環境変数設定スクリプトの作成
+        echo "環境アクティベーションスクリプトを作成します..."
         cat > activate_jetson_env.sh << 'EOF'
 #!/bin/bash
 # Jetson Nano環境のアクティベート
 export JETSON_ENV=1
 export CUDA_VISIBLE_DEVICES=0
-source ~/venv-jetson-py38/bin/activate
+
+# 仮想環境のパス
+VENV_PATH="$HOME/venv-jetson-py38"
+
+# 仮想環境が存在するかチェック
+if [ ! -f "$VENV_PATH/bin/activate" ]; then
+    echo "エラー: 仮想環境が見つかりません: $VENV_PATH"
+    echo "setup_jetson.shを再実行してください"
+    return 1
+fi
+
+# 仮想環境をアクティベート
+source "$VENV_PATH/bin/activate"
+
 echo "Jetson Nano Python 3.8環境がアクティブになりました"
 echo "Python: $(python --version)"
-echo "PyTorch: $(python -c 'import torch; print(torch.__version__)' 2>/dev/null || echo 'not installed')"
+echo "pip: $(pip --version)"
+
+# PyTorchの確認
+if python -c "import torch" 2>/dev/null; then
+    echo "PyTorch: $(python -c 'import torch; print(torch.__version__)')"
+    echo "CUDA Available: $(python -c 'import torch; print(torch.cuda.is_available())')"
+else
+    echo "PyTorch: not installed"
+fi
+
 echo ""
 echo "サーバーを起動するには:"
-echo "  cd server && python main.py"
+echo "  cd $(pwd) && python server/main.py"
+echo ""
+echo "環境を無効化するには:"
+echo "  deactivate"
 EOF
         chmod +x activate_jetson_env.sh
+        
+        # インストール検証
+        echo "インストールを検証します..."
+        if python -c "import torch, cv2, fastapi" 2>/dev/null; then
+            echo "✓ 主要パッケージのインポートに成功"
+        else
+            echo "⚠ 一部のパッケージでインポートエラーが発生しました"
+        fi
         
         echo ""
         echo "セットアップ完了！"
@@ -148,7 +227,20 @@ EOF
         
         if [[ $confirm == [yY] ]]; then
             echo "依存関係をインストールします..."
-            pip3 install -r requirements.txt
+            
+            # pipの確認
+            if command -v pip3 &> /dev/null; then
+                pip3 install --upgrade pip
+                pip3 install -r requirements.txt || {
+                    echo "requirements.txtでのインストールに失敗しました"
+                    echo "個別パッケージのインストールを試行します..."
+                    pip3 install fastapi uvicorn aiofiles requests
+                }
+            else
+                echo "エラー: pip3が見つかりません"
+                exit 1
+            fi
+            
             echo ""
             echo "セットアップ完了（互換性問題が発生する可能性があります）"
         else
