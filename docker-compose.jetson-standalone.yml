@@ -1,0 +1,55 @@
+# Jetson Nano用 Docker Compose
+version: '3.8'
+
+services:
+  edge-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.jetson-standalone
+    container_name: jetson-edge-server
+    restart: unless-stopped
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility,video
+      - SERVER_HOST=0.0.0.0
+      - SERVER_PORT=8000
+      - API_KEY=${API_KEY:-jetson_api_key_here}
+      - PERSON_DETECTION_THRESHOLD=${PERSON_DETECTION_THRESHOLD:-0.5}
+      - COOLDOWN_SECONDS=${COOLDOWN_SECONDS:-30}
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/workspace/data
+      - ./logs:/workspace/logs
+      - ./uploads:/workspace/uploads
+      - /dev/video0:/dev/video0  # カメラデバイスのマウント
+    devices:
+      - /dev/video0:/dev/video0
+    network_mode: host
+    privileged: true
+    
+  edge-client:
+    build:
+      context: .
+      dockerfile: Dockerfile.jetson-standalone
+    container_name: jetson-edge-client
+    restart: unless-stopped
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility,video
+      - DEVICE_ID=${DEVICE_ID:-jetson-001}
+      - SERVER_URL=${SERVER_URL:-http://localhost:8000}
+      - API_KEY=${API_KEY:-jetson_api_key_here}
+    volumes:
+      - ./data:/workspace/data
+      - ./logs:/workspace/logs
+      - /dev/video0:/dev/video0
+    devices:
+      - /dev/video0:/dev/video0
+    network_mode: host
+    depends_on:
+      - edge-server
+    command: ["python3", "edge/client.py", "--device-id", "jetson-001", "--mode", "continuous"]
+    privileged: true

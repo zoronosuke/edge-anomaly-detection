@@ -1,0 +1,50 @@
+# Jetson Nano用 Dockerfile
+# NVIDIA L4T ML Base Image を使用
+
+FROM nvcr.io/nvidia/l4t-ml:r32.7.1-py3
+
+LABEL maintainer="edge-anomaly-detection"
+LABEL description="Edge Anomaly Detection for Jetson Nano"
+
+# 作業ディレクトリの設定
+WORKDIR /workspace
+
+# システムパッケージの更新
+RUN apt-get update && apt-get install -y \
+    python3-pip \
+    python3-dev \
+    git \
+    curl \
+    wget \
+    vim \
+    && rm -rf /var/lib/apt/lists/*
+
+# Pythonパッケージの更新
+RUN pip3 install --upgrade pip
+
+# プロジェクトファイルをコピー
+COPY requirements-docker-jetson.txt .
+COPY . .
+
+# 依存関係のインストール
+RUN pip3 install -r requirements-docker-jetson.txt
+
+# 必要なディレクトリを作成
+RUN mkdir -p logs data uploads results models temp
+
+# 環境変数の設定
+ENV PYTHONPATH=/workspace
+ENV SERVER_HOST=0.0.0.0
+ENV SERVER_PORT=8000
+ENV DATA_DIR=/workspace/data
+ENV LOG_DIR=/workspace/logs
+
+# ポートの公開
+EXPOSE 8000
+
+# ヘルスチェック
+HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8000/ || exit 1
+
+# エントリーポイント
+CMD ["python3", "server/main.py"]

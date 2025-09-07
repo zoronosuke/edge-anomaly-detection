@@ -1,0 +1,24 @@
+# Docker環境用依存関係 (最新版)
+# NVIDIA L4T MLコンテナ内での使用
+
+# Web Framework
+fastapi==0.100.0
+uvicorn[standard]==0.23.0
+python-multipart==0.0.6
+aiofiles==23.1.0
+
+# 画像処理とコンピュータビジョン
+opencv-python==4.8.0.74
+pillow==10.0.0
+numpy>=1.24.0
+
+# 機械学習 (最新版)
+ultralytics>=8.0.200
+torch>=2.0.0
+torchvision>=0.15.0
+
+# HTTPクライアント
+requests==2.31.0
+
+# 環境設定
+python-dotenv==1.0.0

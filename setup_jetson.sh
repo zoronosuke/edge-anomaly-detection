@@ -22,14 +22,18 @@ else
 fi
 echo ""
 
-# 選択肢の提示
+# 依存関係競合の確認
+echo "⚠️  依存関係競合の解決オプション"
+echo "numpy バージョン競合が検出される場合があります。"
+echo ""
 echo "セットアップ方法を選択してください:"
-echo "1) Docker環境での実行 (推奨)"
-echo "2) Python 3.8仮想環境のセットアップ"
-echo "3) 現在のPython環境での強制実行 (非推奨)"
+echo "1) Docker環境での実行 (最推奨・競合なし)"
+echo "2) numpy更新版 - Python 3.8仮想環境"
+echo "3) 互換版 - 古いnumpyを維持"
+echo "4) 現在のPython環境での強制実行 (非推奨)"
 echo ""
 
-read -p "選択してください [1-3]: " choice
+read -p "選択してください [1-4]: " choice
 
 case $choice in
     1)
@@ -37,17 +41,65 @@ case $choice in
         echo "Docker環境のセットアップ"
         echo "=========================================="
         
-        # Dockerが利用可能かチェック
-        if ! command -v docker &> /dev/null; then
-            echo "エラー: Dockerがインストールされていません"
-            echo "以下のコマンドでDockerをインストールしてください:"
-            echo "curl -fsSL https://get.docker.com -o get-docker.sh"
-            echo "sudo sh get-docker.sh"
-            exit 1
+        # Docker環境の設定（既存のコード）
+        # ...
+        
+    2)
+        echo "=========================================="
+        echo "Python 3.8仮想環境 (numpy更新版)"
+        echo "=========================================="
+        
+        # Python 3.8仮想環境のセットアップ
+        VENV_PATH="$HOME/venv-jetson-py38"
+        
+        if [ -d "$VENV_PATH" ]; then
+            echo "既存の仮想環境を削除します..."
+            rm -rf "$VENV_PATH"
         fi
         
-        # nvidia-dockerの確認
-        if ! docker info | grep -q nvidia; then
+        python3.8 -m venv "$VENV_PATH"
+        source "$VENV_PATH/bin/activate"
+        
+        # pip を更新
+        pip install --upgrade pip
+        
+        # numpy を先にアップデート
+        echo "📦 numpy バージョンを更新して競合を解決しています..."
+        pip install "numpy>=1.22.2"
+        
+        # 他の依存関係をインストール
+        pip install -r requirements-jetson.txt
+        
+        echo "✅ セットアップ完了"
+        ;;
+    
+    3)
+        echo "=========================================="
+        echo "Python 3.8仮想環境 (互換版)"
+        echo "=========================================="
+        
+        # Python 3.8仮想環境のセットアップ
+        VENV_PATH="$HOME/venv-jetson-py38-compat"
+        
+        if [ -d "$VENV_PATH" ]; then
+            echo "既存の仮想環境を削除します..."
+            rm -rf "$VENV_PATH"
+        fi
+        
+        python3.8 -m venv "$VENV_PATH"
+        source "$VENV_PATH/bin/activate"
+        
+        # pip を更新
+        pip install --upgrade pip
+        
+        # 互換版依存関係をインストール
+        echo "📦 互換版パッケージをインストールしています..."
+        pip install -r requirements-jetson-compat.txt
+        
+        echo "✅ セットアップ完了"
+        ;;
+    
+    4) then
             echo "警告: nvidia-dockerが設定されていない可能性があります"
         fi
         

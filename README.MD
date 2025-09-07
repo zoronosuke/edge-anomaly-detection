@@ -61,62 +61,82 @@ edge-anomaly-detection/
 └── yolov8n.pt                 # YOLOv8nモデルファイル
 ```
 
-## 🚀 クイックスタート
+## ⚡ Quick Start
 
-### 📥 リポジトリのクローンと基本セットアップ
+### �️ Windows/Linux (開発環境)
 
+1. **リポジトリのクローン**
 ```bash
-# リポジトリをクローン
 git clone https://github.com/zoronosuke/edge-anomaly-detection.git
 cd edge-anomaly-detection
-
-# 実行権限の設定（Linux/Jetsonの場合）
-bash make_executable.sh
 ```
 
-### 🏠 標準環境（Windows x86_64）
-
-#### 1. 環境セットアップ
+2. **環境セットアップ**
 ```bash
-# 方法A: 自動セットアップ（推奨）
-tasks.bat setup-dev
-
-# 方法B: 手動セットアップ
+# Python仮想環境の作成
 python -m venv venv
-venv\Scripts\activate.bat
-pip install --upgrade pip
+source venv/bin/activate  # Linux/Mac
+# または
+venv\Scripts\activate     # Windows
+
+# 依存関係のインストール
 pip install -r requirements.txt
 ```
 
-#### 2. 設定ファイルの準備
+3. **設定ファイルの準備**
 ```bash
-# 環境変数ファイルをコピー
-copy .env.example .env
-
-# .envファイルを編集（任意のテキストエディタで）
-# API_KEY=your_secret_api_key
-# LINE_CHANNEL_ACCESS_TOKEN=your_line_token（オプション）
+cp .env.example .env
+# .envファイルを編集してAPI_KEYなどを設定
 ```
 
-#### 3. サーバー起動
+4. **サーバー起動**
 ```bash
-# 🚀 簡単起動（推奨）
-start_server.bat
-
-# 🚀 または手動起動
-venv\Scripts\activate.bat
-python server\main.py
+python server/main.py
 ```
 
-#### 4. クライアント起動（別ターミナル）
-```bash
-# 🚀 簡単起動
-start_client.bat --device-id windows-pc-001
+### 🤖 Jetson Nano (エッジデバイス)
 
-# 🚀 または手動起動
-venv\Scripts\activate.bat
-python edge\client.py --device-id windows-pc-001 --server-url http://localhost:8000
+#### ⚠️ 重要: 依存関係競合の解決
+
+Jetson Nano環境では**numpy**と**ultralytics**のバージョン競合が発生する場合があります。
+以下の解決方法から選択してください：
+
+1. **リポジトリのクローン**
+```bash
+git clone https://github.com/zoronosuke/edge-anomaly-detection.git
+cd edge-anomaly-detection
+chmod +x *.sh
 ```
+
+2. **環境チェック**
+```bash
+python3 check_jetson_env.py
+```
+
+3. **セットアップ実行**
+```bash
+./setup_jetson.sh
+```
+
+**セットアップオプション:**
+- **Option 1**: 🐳 **Docker環境** (最推奨・競合なし)
+- **Option 2**: 🔄 **numpy更新版** - Python 3.8仮想環境
+- **Option 3**: 🔧 **互換版** - 古いnumpyを維持
+- **Option 4**: ⚠️ **強制実行** (非推奨)
+
+4. **環境のアクティベート（次回起動時）**
+```bash
+source activate_jetson_env.sh
+```
+
+#### 🔧 依存関係競合の詳細
+
+**問題**: `numpy==1.19.5` vs `ultralytics>=8.0.200 (requires numpy>=1.22.2)`
+
+**解決策**:
+- **更新版**: `numpy>=1.22.2` + `ultralytics>=8.0.200` 
+- **互換版**: `numpy==1.19.5` + `ultralytics==8.0.100`
+- **Docker**: コンテナ内で最新版を使用
 
 ### 🤖 Jetson Nano環境
 
@@ -222,9 +242,47 @@ curl -X POST "http://localhost:8000/ingest" \
   -F "device_id=test-device"
 ```
 
-### 🔧 トラブルシューティング
+## 🔧 トラブルシューティング
 
-#### よくあるエラーと解決策
+### 依存関係競合の解決
+
+#### エラー: `ERROR: Cannot install -r requirements-jetson.txt`
+```
+ERROR: Cannot install -r requirements-jetson.txt (line 17) and numpy==1.19.5 because these package versions have conflicting dependencies.
+The conflict is caused by:
+    The user requested numpy==1.19.5  
+    ultralytics 8.0.200 depends on numpy>=1.22.2
+```
+
+**解決方法 1: numpy更新版（推奨）**
+```bash
+# セットアップを再実行
+./setup_jetson.sh
+# 選択肢 2 を選択（numpy更新版）
+
+# または手動で修正
+pip uninstall ultralytics numpy -y
+pip install "numpy>=1.22.2"
+pip install -r requirements-jetson.txt
+```
+
+**解決方法 2: 互換版**
+```bash
+# セットアップを再実行  
+./setup_jetson.sh
+# 選択肢 3 を選択（互換版）
+
+# または手動で修正
+pip install -r requirements-jetson-compat.txt
+```
+
+**解決方法 3: Docker環境（最推奨）**
+```bash
+./setup_jetson.sh
+# 選択肢 1 を選択（Docker環境）
+```
+
+### よくある問題
 
 **FileNotFoundError: logs/server.log**
 ```bash
