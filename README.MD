@@ -52,91 +52,44 @@ edge-anomaly-detection/
 
 ## 🚀 クイックスタート
 
-### 🏠 標準環境（x86_64）
+### 📥 リポジトリのクローンと基本セットアップ
 
 ```bash
-git clone https://github.com/your-repo/edge-anomaly-detection.git
+# リポジトリをクローン
+git clone https://github.com/zoronosuke/edge-anomaly-detection.git
 cd edge-anomaly-detection
 
-# Windows簡単セットアップ
+# 実行権限の設定（Linux/Jetsonの場合）
+bash make_executable.sh
+```
+
+### 🏠 標準環境（Windows x86_64）
+
+#### 1. 環境セットアップ
+```bash
+# 方法A: 自動セットアップ（推奨）
 tasks.bat setup-dev
 
-# または手動セットアップ
+# 方法B: 手動セットアップ
 python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
-pip install -r requirements.txt
-```
-
-### 🤖 Jetson Nano環境
-
-#### ステップ1: 環境確認
-```bash
-# 互換性をチェック
-python3 check_jetson_env.py
-```
-
-#### ステップ2: 環境セットアップ（推奨順）
-
-**Option A: Docker環境（最推奨）**
-```bash
-# 自動セットアップ
-./setup_jetson.sh
-# -> 選択肢 1 を選ぶ
-
-# または手動でDocker起動
-sudo docker run --runtime nvidia -it --rm \
-  --network host --ipc=host \
-  -v $(pwd):/workspace \
-  -p 8000:8000 \
-  nvcr.io/nvidia/l4t-ml:r32.7.1-py3
-```
-
-**Option B: Python 3.8仮想環境**
-```bash
-# 自動セットアップ
-./setup_jetson.sh
-# -> 選択肢 2 を選ぶ
-
-# 手動環境構築
-sudo apt install python3.8 python3.8-venv python3.8-dev
-python3.8 -m venv ~/venv-jetson-py38
-source ~/venv-jetson-py38/bin/activate
-pip install -r requirements-jetson.txt
-```
-
-#### ステップ3: サーバー起動
-```bash
-# 簡単起動スクリプト
-./start_jetson_server.sh
-
-# または直接起動
-cd server
-python main.py
-```
-python -m venv venv
-venv\Scripts\activate.bat  # Windows
+venv\Scripts\activate.bat
 pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-### 2. 設定
-
+#### 2. 設定ファイルの準備
 ```bash
 # 環境変数ファイルをコピー
 copy .env.example .env
 
-# .envファイルを編集
+# .envファイルを編集（任意のテキストエディタで）
 # API_KEY=your_secret_api_key
-# LINE_CHANNEL_ACCESS_TOKEN=your_line_token (オプション)
+# LINE_CHANNEL_ACCESS_TOKEN=your_line_token（オプション）
 ```
 
-### 3. サーバ起動
-
+#### 3. サーバー起動
 ```bash
-# 🚀 簡単起動
-tasks.bat server
-
-# 🚀 またはバッチファイル使用
+# 🚀 簡単起動（推奨）
 start_server.bat
 
 # 🚀 または手動起動
@@ -144,10 +97,139 @@ venv\Scripts\activate.bat
 python server\main.py
 ```
 
-### 4. エッジクライアント起動
-
+#### 4. クライアント起動（別ターミナル）
 ```bash
 # 🚀 簡単起動
+start_client.bat --device-id windows-pc-001
+
+# 🚀 または手動起動
+venv\Scripts\activate.bat
+python edge\client.py --device-id windows-pc-001 --server-url http://localhost:8000
+```
+
+### 🤖 Jetson Nano環境
+
+#### 1. 環境確認
+```bash
+# Python環境とJetPackの互換性をチェック
+python3 check_jetson_env.py
+```
+
+#### 2. 環境セットアップ（推奨順）
+
+**Option A: 自動セットアップ（最推奨）**
+```bash
+# インタラクティブセットアップ
+./setup_jetson.sh
+
+# 推奨選択肢:
+# 1) Docker環境での実行（最推奨）
+# 2) Python 3.8仮想環境のセットアップ
+# 3) 現在のPython環境での強制実行（非推奨）
+```
+
+**Option B: Docker環境（手動）**
+```bash
+# NVIDIA Docker runtimeが必要
+sudo docker run --runtime nvidia -it --rm \
+  --network host --ipc=host \
+  --name jetson-edge-detection \
+  -v $(pwd):/workspace \
+  -w /workspace \
+  -p 8000:8000 \
+  nvcr.io/nvidia/l4t-ml:r32.7.1-py3
+```
+
+**Option C: Python 3.8仮想環境（手動）**
+```bash
+# Python 3.8のインストール
+sudo apt update
+sudo apt install -y python3.8 python3.8-venv python3.8-dev
+
+# 仮想環境の作成とアクティベート
+python3.8 -m venv ~/venv-jetson-py38
+source ~/venv-jetson-py38/bin/activate
+
+# 依存関係のインストール
+pip install --upgrade pip
+pip install -r requirements-jetson.txt
+```
+
+#### 3. 環境のアクティベート（次回起動時）
+```bash
+# セットアップ完了後は以下のコマンドで環境をアクティベート
+source activate_jetson_env.sh
+```
+
+#### 4. サーバー起動
+```bash
+# 🚀 簡単起動スクリプト（推奨）
+./start_jetson_server.sh
+
+# 🚀 または手動起動
+python server/main.py
+```
+
+#### 5. セットアップの確認
+```bash
+# 環境が正しく構築されているかテスト
+./test_jetson_setup.sh
+```
+
+### 🧪 動作確認
+
+#### システムテスト
+```bash
+# 基本テスト（Windows）
+python basic_test.py
+
+# 完全なシステムテスト
+python test_system.py
+
+# Windows用バッチファイル
+tasks.bat test
+```
+
+#### 手動テスト
+```bash
+# サーバー接続確認
+curl http://localhost:8000/
+
+# 画像アップロードテスト（cURLがある場合）
+curl -X POST "http://localhost:8000/ingest" \
+  -H "Authorization: Bearer your_api_key" \
+  -F "file=@test_image.jpg" \
+  -F "device_id=test-device"
+```
+
+### 🔧 トラブルシューティング
+
+#### Jetson Nano環境の問題
+```bash
+# 環境の再確認
+python3 check_jetson_env.py
+
+# セットアップの再実行
+./setup_jetson.sh
+
+# Docker環境にフォールバック
+sudo docker run --runtime nvidia -it --rm \
+  --network host \
+  -v $(pwd):/workspace \
+  nvcr.io/nvidia/l4t-ml:r32.7.1-py3
+```
+
+#### Windows環境の問題
+```bash
+# 仮想環境の再作成
+rmdir /s venv
+python -m venv venv
+venv\Scripts\activate.bat
+pip install -r requirements.txt
+```
+
+### 📂 プロジェクト構造の確認
+正常にセットアップできた場合、以下の構造が確認できます：
 tasks.bat client jetson-001
 
 # 🚀 またはバッチファイル使用
