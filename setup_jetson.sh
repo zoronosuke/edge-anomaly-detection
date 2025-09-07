@@ -152,6 +152,7 @@ case $choice in
             
             python -m pip install "$TORCH_WHL"
             
+            
             # torchvision
             echo "torchvisionをインストールします..."
             sudo apt install -y libjpeg-dev zlib1g-dev libopenblas-dev
