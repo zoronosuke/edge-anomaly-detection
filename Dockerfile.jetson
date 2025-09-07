@@ -1,0 +1,46 @@
+# Jetson Nano専用Dockerfile
+# L4T (Linux for Tegra) ベースイメージを使用
+FROM nvcr.io/nvidia/l4t-ml:r32.7.1-py3
+
+WORKDIR /workspace
+
+# システムパッケージの更新
+RUN apt-get update && apt-get install -y \
+    python3-pip \
+    python3-dev \
+    python3-opencv \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender-dev \
+    libgomp1 \
+    wget \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# pipのアップグレード
+RUN pip3 install --upgrade pip
+
+# Jetson用依存関係をインストール
+COPY requirements-jetson.txt .
+RUN pip3 install --no-cache-dir -r requirements-jetson.txt
+
+# YOLOモデルの事前ダウンロード
+RUN python3 -c "from ultralytics import YOLO; model = YOLO('yolov8n.pt')"
+
+# アプリケーションコードをコピー
+COPY server/ ./server/
+COPY data/ ./data/
+COPY logs/ ./logs/
+COPY config.json .
+COPY .env .
+
+# ポート開放
+EXPOSE 8000
+
+# ヘルスチェック
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:8000/ || exit 1
+
+# 起動コマンド
+CMD ["python3", "server/main.py"]

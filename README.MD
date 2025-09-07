@@ -5,6 +5,8 @@
 
 エッジデバイスからの映像をリアルタイムでサーバに送信し、機械学習による人検出と異常通知を行うシステムです。
 
+**🎯 Jetson Nano対応**: JetPack 4.6.6環境での動作を最適化済み
+
 ## 🛠️ システム構成
 
 ```
@@ -15,39 +17,102 @@
                          └─ CSV/JSON保存
 ```
 
+## 🔧 対応プラットフォーム
+
+- **x86_64**: Windows, Linux, macOS
+- **ARM64**: Jetson Nano (JetPack 4.6.6)
+- **Python**: 3.8+ (Jetson Nano: 3.8推奨)
+
 ## 📁 プロジェクト構造
 
 ```
 edge-anomaly-detection/
-├── server/                 # サーバサイドコード
-│   ├── main.py            # FastAPI メインアプリ
-│   └── line_notifier.py   # LINE通知モジュール
-├── edge/                  # エッジデバイスコード
-│   └── client.py          # カメラクライアント
-├── tools/                 # 分析ツール
+├── server/                      # サーバサイドコード
+│   ├── main.py                 # FastAPI メインアプリ
+│   └── line_notifier.py        # LINE通知モジュール
+├── edge/                       # エッジデバイスコード
+│   └── client.py               # カメラクライアント
+├── tools/                      # 分析ツール
 │   └── performance_analyzer.py
-├── data/                  # データ保存ディレクトリ
-├── logs/                  # ログファイル
-├── requirements.txt       # Python依存関係
-├── .env.example          # 環境変数テンプレート
-├── config.json           # 設定ファイル
-├── start_server.bat      # サーバ起動スクリプト
-├── start_client.bat      # クライアント起動スクリプト
-└── test_system.py        # システムテストスクリプト
+├── data/                       # データ保存ディレクトリ
+├── logs/                       # ログファイル
+├── requirements.txt            # Python依存関係（汎用）
+├── requirements-jetson.txt     # Jetson Nano専用依存関係
+├── .env.example               # 環境変数テンプレート
+├── config.json                # 設定ファイル
+├── check_jetson_env.py        # Jetson環境チェック
+├── setup_jetson.sh            # Jetson環境セットアップ
+├── start_jetson_server.sh     # Jetson用起動スクリプト
+├── Dockerfile.jetson          # Jetson用Dockerファイル
+├── docker-compose.jetson.yml  # Jetson用Docker Compose
+├── start_server.bat           # サーバ起動スクリプト（Windows）
+├── start_client.bat           # クライアント起動スクリプト（Windows）
+└── test_system.py             # システムテストスクリプト
 ```
 
 ## 🚀 クイックスタート
 
-### 1. 環境準備
+### 🏠 標準環境（x86_64）
 
 ```bash
 git clone https://github.com/your-repo/edge-anomaly-detection.git
 cd edge-anomaly-detection
 
-# 🔄 簡単セットアップ（Windows）
+# Windows簡単セットアップ
 tasks.bat setup-dev
 
-# 🔄 または手動セットアップ
+# または手動セットアップ
+python -m venv venv
+source venv/bin/activate  # Windows: venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+### 🤖 Jetson Nano環境
+
+#### ステップ1: 環境確認
+```bash
+# 互換性をチェック
+python3 check_jetson_env.py
+```
+
+#### ステップ2: 環境セットアップ（推奨順）
+
+**Option A: Docker環境（最推奨）**
+```bash
+# 自動セットアップ
+./setup_jetson.sh
+# -> 選択肢 1 を選ぶ
+
+# または手動でDocker起動
+sudo docker run --runtime nvidia -it --rm \
+  --network host --ipc=host \
+  -v $(pwd):/workspace \
+  -p 8000:8000 \
+  nvcr.io/nvidia/l4t-ml:r32.7.1-py3
+```
+
+**Option B: Python 3.8仮想環境**
+```bash
+# 自動セットアップ
+./setup_jetson.sh
+# -> 選択肢 2 を選ぶ
+
+# 手動環境構築
+sudo apt install python3.8 python3.8-venv python3.8-dev
+python3.8 -m venv ~/venv-jetson-py38
+source ~/venv-jetson-py38/bin/activate
+pip install -r requirements-jetson.txt
+```
+
+#### ステップ3: サーバー起動
+```bash
+# 簡単起動スクリプト
+./start_jetson_server.sh
+
+# または直接起動
+cd server
+python main.py
+```
 python -m venv venv
 venv\Scripts\activate.bat  # Windows
 pip install --upgrade pip

@@ -1,0 +1,33 @@
+# Jetson Nano (JetPack 4.6.6 + Python 3.8) 対応版
+# Docker環境またはPython 3.8仮想環境で使用
+
+# Web framework
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+python-multipart==0.0.6
+python-dotenv==1.0.0
+aiofiles==23.2.1
+httpx==0.25.2
+
+# Computer Vision - Jetson Nano対応版
+# OpenCV (システムパッケージ推奨: apt install python3-opencv)
+# opencv-python==4.5.3.56  # JetPack 4.6.6互換版
+
+# YOLO - 軽量版を使用
+ultralytics==8.0.200  # より安定した版
+
+# PyTorch - Jetson Nano専用ホイールを使用
+# 注意: 通常のpip installではなく、NVIDIA提供のホイールを使用
+# torch==1.13.0  # JetPack 4.6.6対応版（別途インストール）
+# torchvision==0.14.0  # JetPack 4.6.6対応版（別途インストール）
+
+# Image processing
+Pillow==9.5.0  # Python 3.8互換版
+
+# Core dependencies
+requests==2.31.0
+numpy==1.19.5  # JetPack 4.6.6標準版
+pydantic==2.4.2
+
+# Optional: Performance monitoring
+psutil==5.9.6

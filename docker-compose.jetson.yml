@@ -1,0 +1,61 @@
+version: '3.8'
+
+services:
+  # 標準版（x86_64用）
+  edge-anomaly-server:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./.env:/app/.env
+    environment:
+      - SERVER_HOST=0.0.0.0
+      - SERVER_PORT=8000
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    profiles:
+      - standard
+
+  # Jetson Nano版（ARM64/L4T用）
+  edge-anomaly-server-jetson:
+    build:
+      context: .
+      dockerfile: Dockerfile.jetson
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/workspace/data
+      - ./logs:/workspace/logs
+      - ./.env:/workspace/.env
+    environment:
+      - SERVER_HOST=0.0.0.0
+      - SERVER_PORT=8000
+      - JETSON_ENV=1
+    restart: unless-stopped
+    runtime: nvidia  # NVIDIA Dockerランタイムを使用
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    profiles:
+      - jetson
+
+  # 将来的にデータベースが必要になった場合
+  # postgres:
+  #   image: postgres:13
+  #   environment:
+  #     POSTGRES_DB: edge_anomaly
+  #     POSTGRES_USER: postgres
+  #     POSTGRES_PASSWORD: password
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql/data
+
+# volumes:
+#   postgres_data:

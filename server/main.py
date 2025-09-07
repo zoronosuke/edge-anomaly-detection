@@ -3,6 +3,8 @@ import json
 import csv
 import uuid
 import asyncio
+import sys
+import platform
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, Optional
@@ -29,6 +31,54 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
+
+def check_environment_compatibility():
+    """環境互換性チェック"""
+    python_version = sys.version_info
+    platform_info = platform.platform()
+    
+    logger.info(f"Python Version: {python_version.major}.{python_version.minor}.{python_version.micro}")
+    logger.info(f"Platform: {platform_info}")
+    
+    # Jetson Nano検出
+    is_jetson = os.path.exists('/etc/nv_tegra_release')
+    if is_jetson:
+        try:
+            with open('/etc/nv_tegra_release', 'r') as f:
+                tegra_info = f.read().strip()
+            logger.info(f"Jetson Info: {tegra_info}")
+            
+            # JetPack 4.6.6 + Python 3.12の組み合わせ警告
+            if "R32.7" in tegra_info and python_version.major == 3 and python_version.minor == 12:
+                logger.warning("⚠ COMPATIBILITY WARNING:")
+                logger.warning("  JetPack 4.6.6 with Python 3.12 may have compatibility issues")
+                logger.warning("  Consider using Docker or Python 3.8 environment")
+                logger.warning("  Run 'python check_jetson_env.py' for detailed analysis")
+            elif "R32.7" in tegra_info and python_version.major == 3 and python_version.minor == 8:
+                logger.info("✓ Jetson Nano + Python 3.8: Optimal compatibility")
+                
+        except Exception as e:
+            logger.error(f"Failed to read Jetson info: {e}")
+    
+    # PyTorchのCUDA確認
+    try:
+        import torch
+        cuda_available = torch.cuda.is_available()
+        logger.info(f"PyTorch CUDA Available: {cuda_available}")
+        if cuda_available and is_jetson:
+            logger.info(f"GPU Device: {torch.cuda.get_device_name(0)}")
+    except ImportError:
+        logger.warning("PyTorch not available - some features may be limited")
+    
+    # OpenCVのビルド情報確認
+    try:
+        build_info = cv2.getBuildInformation()
+        if "CUDA" in build_info:
+            logger.info("✓ OpenCV with CUDA support detected")
+        else:
+            logger.info("OpenCV without CUDA support")
+    except:
+        logger.warning("Failed to get OpenCV build information")
 
 app = FastAPI(title="Edge Anomaly Detection Server", version="1.0.0")
 
@@ -165,6 +215,7 @@ async def verify_api_key(credentials: HTTPAuthorizationCredentials = Security(se
 @app.on_event("startup")
 async def startup_event():
     """アプリケーション起動時の処理"""
+    check_environment_compatibility()
     await detection_system.load_model()
     logger.info("Server startup completed")
 
