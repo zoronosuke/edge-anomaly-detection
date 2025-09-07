@@ -114,10 +114,18 @@ def generate_recommendations(python_status, jetpack_status, package_results, gpu
     # パッケージ不足の確認
     missing_packages = [pkg for pkg, info in package_results.items() if info['status'] == 'missing']
     if missing_packages:
+        # cv2パッケージ名をopencv-pythonに変換
+        install_packages = []
+        for pkg in missing_packages:
+            if pkg == 'cv2':
+                install_packages.append('opencv-python')
+            else:
+                install_packages.append(pkg)
+        
         recommendations.extend([
             f"📦 不足パッケージ: {', '.join(missing_packages)}",
             "インストールコマンド:",
-            f"   pip install {' '.join(missing_packages)}",
+            f"   pip install {' '.join(install_packages)}",
             ""
         ])
     
